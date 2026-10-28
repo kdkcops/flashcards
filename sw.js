@@ -1,5 +1,5 @@
 // 앱 파일은 네트워크 우선(오프라인 시 캐시), CDN 라이브러리는 캐시 우선
-const CACHE = 'flashcards-v2';
+const CACHE = 'flashcards-v3';
 const SHELL = ['./', 'index.html', 'styles.css', 'app.js', 'db.js', 'ocr.js', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {
@@ -20,7 +20,8 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin === location.origin) {
     e.respondWith(
-      fetch(req)
+      // HTTP 캐시를 거치지 않고 서버에 확인 (배포 직후 바로 새 버전 반영)
+      fetch(req, { cache: 'no-cache' })
         .then((res) => {
           const copy = res.clone();
           caches.open(CACHE).then((c) => c.put(req, copy));
