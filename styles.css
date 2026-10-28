@@ -91,7 +91,11 @@ button, input, textarea { font: inherit; color: inherit; }
 .btn-danger { background: var(--wrong); border-color: var(--wrong); color: #fff; }
 .btn-right { background: var(--right); border-color: var(--right); color: #fff; font-size: 20px; }
 .btn-wrong { background: var(--wrong); border-color: var(--wrong); color: #fff; font-size: 20px; }
+.btn-review { background: color-mix(in srgb, var(--wrong) 14%, var(--surface)); border-color: color-mix(in srgb, var(--wrong) 45%, var(--line)); color: var(--wrong); }
 .grow { flex: 1; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin: 24px 0 10px; }
+.section-head .section-title { margin: 0; }
+.mode-tag { font-size: 13px; font-weight: 700; color: var(--wrong); background: color-mix(in srgb, var(--wrong) 14%, transparent); padding: 2px 8px; border-radius: 999px; margin-right: 8px; vertical-align: 2px; }
 .full { width: 100%; }
 
 .input {

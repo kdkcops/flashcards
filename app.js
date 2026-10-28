@@ -35,7 +35,9 @@ function objURL(blob) {
 }
 
 const isDue = (c, now = Date.now()) => c.nextDue == null || c.nextDue <= now;
-const isEmptyFace = (f) => !f || (!(f.text || '').trim() && !(f.attachments || []).length);
+// 오늘 학습에서 마지막으로 틀린 카드 (다시 맞힐 때까지 오답 확인 대상)
+const isWrong = (c) => c.lastResult === false;
+const isEmptyFace =(f) => !f || (!(f.text || '').trim() && !(f.attachments || []).length);
 
 function fmtDate(ts) {
   const d = new Date(ts);
@@ -108,6 +110,7 @@ async function viewHome() {
   const now = Date.now();
   const due = cards.filter((c) => isDue(c, now));
   const dueNew = due.filter((c) => c.nextDue == null).length;
+  const wrongCount = cards.filter(isWrong).length;
   const waiting = Object.fromEntries(INTERVALS.map((i) => [i.key, 0]));
   cards.forEach((c) => { if (!isDue(c, now) && waiting[c.lastInterval] != null) waiting[c.lastInterval]++; });
   const nextUp = cards.filter((c) => !isDue(c, now)).reduce((m, c) => Math.min(m, c.nextDue), Infinity);
@@ -136,7 +139,10 @@ async function viewHome() {
         </div>
       </section>
       <section>
-        <h2 class="section-title">과목 <span class="muted">${decks.length}</span></h2>
+        <div class="section-head">
+          <h2 class="section-title">과목 <span class="muted">${decks.length}</span></h2>
+          <button class="btn btn-sm" data-act="new-deck">+ 과목</button>
+        </div>
         ${decks.length ? `<ul class="list">${decks.map((d) => {
           const dc = cards.filter((c) => c.deckId === d.id);
           const dd = dc.filter((c) => isDue(c, now)).length;
@@ -144,16 +150,17 @@ async function viewHome() {
             <span class="li-main"><span class="li-title">${esc(d.name)}</span><span class="li-sub">카드 ${dc.length}장</span></span>
             <span class="badge ${dd ? 'badge-due' : ''}">오늘 ${dd}</span>
           </button></li>`;
-        }).join('')}</ul>` : `<div class="empty">아직 과목이 없습니다.<br>아래 <b>+ 과목</b> 버튼으로 시작하세요.</div>`}
+        }).join('')}</ul>` : `<div class="empty">아직 과목이 없습니다.<br>위의 <b>+ 과목</b> 버튼으로 시작하세요.</div>`}
       </section>
     </main>
     <footer class="bottombar">
-      <button class="btn btn-lg" data-act="new-deck">+ 과목</button>
+      <button class="btn btn-lg btn-review grow" data-act="review">오답 확인${wrongCount ? ` (${wrongCount})` : ''}</button>
       <button class="btn btn-lg btn-primary grow" data-act="study">오늘 학습${due.length ? ` (${due.length})` : ''}</button>
     </footer>`);
 
   $('[data-act=settings]').onclick = () => go('#/settings');
   $('[data-act=study]').onclick = () => go('#/study');
+  $('[data-act=review]').onclick = () => go('#/review');
   $('[data-act=new-deck]').onclick = async () => {
     const name = await promptDlg('새 과목 이름', '', '만들기');
     if (!name) return;
@@ -435,31 +442,40 @@ function choosePages(pdf) {
 }
 
 // ---------- 학습 ----------
-async function viewStudy(deckId) {
+// review=true: 오답 확인 모드. 틀렸던 카드만 연습하고 주기·이력은 바꾸지 않음
+async function viewStudy(deckId, review = false) {
   const now = Date.now();
   let cards = deckId ? await db.cardsByDeck(deckId) : await db.all('cards');
   const deck = deckId ? await db.get('decks', deckId) : null;
   const backTo = deckId ? `#/deck/${deckId}` : '#/';
-  // 복습 대상(오래 기다린 순) → 새 카드(만든 순)
-  const reviews = cards.filter((c) => c.nextDue != null && c.nextDue <= now).sort((a, b) => a.nextDue - b.nextDue);
-  const fresh = cards.filter((c) => c.nextDue == null).sort((a, b) => a.createdAt - b.createdAt);
-  const queue = [...reviews, ...fresh];
+  let queue;
+  if (review) {
+    // 다음 테스트가 가까운 순
+    queue = cards.filter(isWrong).sort((a, b) => a.nextDue - b.nextDue);
+  } else {
+    // 복습 대상(오래 기다린 순) → 새 카드(만든 순)
+    const reviews = cards.filter((c) => c.nextDue != null && c.nextDue <= now).sort((a, b) => a.nextDue - b.nextDue);
+    const fresh = cards.filter((c) => c.nextDue == null).sort((a, b) => a.createdAt - b.createdAt);
+    queue = [...reviews, ...fresh];
+  }
   const stats = { correct: 0, wrong: 0 };
   let idx = 0;
 
   const finish = (message) => {
+    const note = review ? '오답 확인 결과는 암기 주기에 반영되지 않습니다.' : '오답 카드는 6시간 후 다시 학습 대상이 됩니다.';
+    const empty = review ? '틀린 카드가 없습니다.' : `${deck ? esc(deck.name) + ' · ' : ''}지금 학습할 카드가 없습니다.`;
     setView(`
       <main class="content center">
-        <div class="done-emoji">🎉</div>
+        <div class="done-emoji">${review && !(stats.correct + stats.wrong) ? '👍' : '🎉'}</div>
         <h1 class="done-title">${message}</h1>
         ${stats.correct + stats.wrong ? `<p class="done-stats"><span class="ok">정답 ${stats.correct}</span> · <span class="ng">오답 ${stats.wrong}</span></p>
-          <p class="muted">오답 카드는 6시간 후 다시 학습 대상이 됩니다.</p>` : `<p class="muted">${deck ? esc(deck.name) + ' · ' : ''}지금 학습할 카드가 없습니다.</p>`}
+          <p class="muted">${note}</p>` : `<p class="muted">${empty}</p>`}
       </main>
       <footer class="bottombar"><button class="btn btn-lg btn-primary grow" data-act="home">돌아가기</button></footer>`);
     $('[data-act=home]').onclick = () => go(backTo);
   };
 
-  if (!queue.length) return finish('오늘 학습 완료');
+  if (!queue.length) return finish(review ? '오답 확인' : '오늘 학습 완료');
 
   const faceHTML = async (face, label) => {
     let html = `<div class="study-face">${label ? `<div class="face-label">${label}</div>` : ''}`;
@@ -476,7 +492,7 @@ async function viewStudy(deckId) {
   };
 
   const show = async () => {
-    if (idx >= queue.length) return finish('학습 완료');
+    if (idx >= queue.length) return finish(review ? '오답 확인 완료' : '학습 완료');
     const card = queue[idx];
     const hasBack2 = !isEmptyFace(card.back2);
     const [front, b1, b2] = await Promise.all([
@@ -487,7 +503,7 @@ async function viewStudy(deckId) {
     setView(`
       <header class="topbar study-top">
         <div class="progress-wrap">
-          <div class="progress-text" data-testid="progress">${idx + 1} / ${queue.length}</div>
+          <div class="progress-text" data-testid="progress">${review ? '<span class="mode-tag">오답 확인</span>' : ''}${idx + 1} / ${queue.length}</div>
           <div class="bar"><i style="width:${(idx / queue.length) * 100}%"></i></div>
         </div>
         <button class="btn btn-sm" data-act="quit">종료</button>
@@ -508,6 +524,11 @@ async function viewStudy(deckId) {
       actions.innerHTML = `
         <button class="btn btn-lg btn-wrong grow" data-act="wrong">오답</button>
         <button class="btn btn-lg btn-right grow" data-act="right">정답</button>`;
+      if (review) {
+        $('[data-act=wrong]').onclick = () => practice(false);
+        $('[data-act=right]').onclick = () => practice(true);
+        return;
+      }
       $('[data-act=wrong]').onclick = () => answer(card, false, '6h');
       $('[data-act=right]').onclick = stageInterval;
     };
@@ -533,6 +554,13 @@ async function viewStudy(deckId) {
       stageJudge();
     };
     $('[data-act=quit]').onclick = () => go(backTo);
+  };
+
+  // 오답 확인: 결과만 세고 카드·이력은 저장하지 않음
+  const practice = (correct) => {
+    stats[correct ? 'correct' : 'wrong']++;
+    idx++;
+    show();
   };
 
   let busy = false;
@@ -620,6 +648,7 @@ const routes = [
   [/^#\/card\/new\/([\w-]+)$/, (m) => viewEditor(null, m[1])],
   [/^#\/card\/edit\/([\w-]+)$/, (m) => viewEditor(m[1])],
   [/^#\/study(?:\/([\w-]+))?$/, (m) => viewStudy(m[1])],
+  [/^#\/review$/, () => viewStudy(null, true)],
   [/^#\/settings$/, () => viewSettings()],
 ];
 
